@@ -35,18 +35,20 @@ class OrderController extends Controller
         $query = Order::orderBy('created_at', 'desc');
 
         // For orderbook, show all open orders (all users)
-        if ($request->has('orderbook') && $request->orderbook) {
+        $isOrderbook = $request->has('orderbook') && ($request->orderbook === true || $request->orderbook === 'true' || $request->orderbook === '1');
+        
+        if ($isOrderbook) {
+            // Orderbook: show all open orders for the selected symbol
             $query->where('status', Order::STATUS_OPEN);
-            if ($request->has('symbol')) {
+            if ($request->has('symbol') && $request->symbol) {
                 $query->where('symbol', $request->symbol);
             }
         } else {
-            // For "My Orders", only show current user's orders
+            // My Orders: only show current user's orders
             $query->where('user_id', $user->id);
-        }
-
-        if ($request->has('symbol') && !$request->has('orderbook')) {
-            $query->where('symbol', $request->symbol);
+            if ($request->has('symbol') && $request->symbol) {
+                $query->where('symbol', $request->symbol);
+            }
         }
 
         $orders = $query->get()->map(function ($order) {
@@ -149,6 +151,7 @@ class OrderController extends Controller
                 ]);
 
                 // Broadcast order creation to all users (for orderbook updates)
+                // Do this BEFORE matching so the order appears in orderbook even if immediately matched
                 if ($order->status === Order::STATUS_OPEN) {
                     event(new \App\Events\OrderCreated($order));
                 }
@@ -158,6 +161,12 @@ class OrderController extends Controller
                 
                 // Reload order to get updated status if it was matched
                 $order->refresh();
+                
+                // If order was matched, broadcast update to remove it from orderbook
+                // But only if it was actually matched (status changed to FILLED)
+                if ($order->status === Order::STATUS_FILLED) {
+                    event(new \App\Events\OrderUpdated($order));
+                }
 
                 return response()->json([
                     'order' => [
@@ -229,6 +238,9 @@ class OrderController extends Controller
                 // Update order status
                 $order->status = Order::STATUS_CANCELLED;
                 $order->save();
+
+                // Broadcast order update to orderbook so cancelled orders are removed
+                event(new \App\Events\OrderUpdated($order));
 
                 return response()->json([
                     'message' => 'Order cancelled successfully',

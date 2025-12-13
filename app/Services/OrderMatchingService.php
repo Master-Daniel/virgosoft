@@ -139,21 +139,17 @@ class OrderMatchingService
 
         // Broadcast event to both users
         try {
-            \Log::info('OrderMatchingService: Broadcasting OrderMatched event', [
-                'trade_id' => $trade->id,
-                'buyer_id' => $buyer->id,
-                'seller_id' => $seller->id,
-                'channels' => ['private-user.' . $buyer->id, 'private-user.' . $seller->id]
-            ]);
-            
             event(new OrderMatched($trade, $buyer->id, $seller->id));
-            
-            \Log::info('OrderMatchingService: OrderMatched event broadcasted successfully');
         } catch (\Exception $e) {
-            \Log::error('OrderMatchingService: Failed to broadcast OrderMatched event', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
+            // Silently handle broadcast errors
+        }
+
+        // Broadcast order updates to orderbook so filled orders are removed
+        try {
+            event(new \App\Events\OrderUpdated($buyOrder));
+            event(new \App\Events\OrderUpdated($sellOrder));
+        } catch (\Exception $e) {
+            // Silently handle broadcast errors
         }
 
         return $trade;
